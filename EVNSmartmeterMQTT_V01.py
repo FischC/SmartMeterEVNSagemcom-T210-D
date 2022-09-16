@@ -82,14 +82,24 @@ serIn = serial.Serial( port=comport,
 )
 
 
+stream = ""
+daten = ""
+
 while 1:
-    sleep(4.7)
-    daten = recv(serIn)
-    if daten != '':
-        daten = daten.hex()
-    if (daten == '' or daten[0:8] != "68010168"):
-        print ("Invalid Start Bytes... waiting")
+    sleep(.25)
+    stream += recv(serIn).hex()
+    spos = stream.find("68010168")
+    if spos != -1:
+        stream = stream[spos:]
+        if len(stream) < 560 : continue
+        daten = stream[:560]
+        stream = stream[560:] 
+    else:
+        if len(stream) > (560 * 10) : 
+            print ("Missing Start Bytes... waiting")
+            stream = ""
         continue
+
     systemTitel = daten[22:38]
     frameCounter = daten[44:52]
     frame = daten[52:560]
@@ -189,7 +199,10 @@ while 1:
             client.publish("Smartmeter/StromL1",StromL1)
             client.publish("Smartmeter/StromL2",StromL2)
             client.publish("Smartmeter/StromL3",StromL3)
-            client.publish("Smartmeter/Leistungsfaktor",Leistungsfaktor)
+            if client.publish("Smartmeter/Leistungsfaktor",Leistungsfaktor)[0] != 0 :
+                print("Publish fehlgeschlagen!")
+                client.connect(mqttBroker, mqttport)
+
     except BaseException as err:
         print("Fehler: ", format(err))
         continue
