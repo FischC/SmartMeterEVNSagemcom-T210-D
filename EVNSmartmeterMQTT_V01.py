@@ -19,17 +19,17 @@ evn_schluessel = "EVN Schlüssel"
 useMQTT = True
 
 #MQTT Broker IP adresse Eingeben ohne Port!
-mqttBroker = "192.168.1.10"
+mqttBroker = "127.0.0.1"
 mqttuser =""
 mqttpasswort = ""
 mqttport = 1883
+mqttTopic = "Smartmeter"
 
 #Comport Config/Init
 comport = "/dev/ttyUSB0"
 
 #Aktulle Werte auf Console ausgeben (True | False)
 printValue = True
-
 
 # Holt Daten von serieller Schnittstelle
 def recv(serialIncoming):
@@ -61,7 +61,6 @@ units = {
             255: "" # 0xff: no unit, unitless
 }
 
-
 #MQTT Init
 if useMQTT:
     try:
@@ -80,7 +79,6 @@ serIn = serial.Serial( port=comport,
          parity=serial.PARITY_NONE,
          stopbits=serial.STOPBITS_ONE
 )
-
 
 stream = ""
 daten = ""
@@ -188,22 +186,21 @@ while 1:
         
         #MQTT
         if useMQTT:
-            client.publish("Smartmeter/WirkenergieP",WirkenergieP)
-            client.publish("Smartmeter/WirkenergieN",WirkenergieN)
-            client.publish("Smartmeter/MomentanleistungP",MomentanleistungP)
-            client.publish("Smartmeter/MomentanleistungN",MomentanleistungN)
-            client.publish("Smartmeter/Momentanleistung",MomentanleistungP - MomentanleistungN)
-            client.publish("Smartmeter/SpannungL1",SpannungL1)
-            client.publish("Smartmeter/SpannungL2",SpannungL2)
-            client.publish("Smartmeter/SpannungL3",SpannungL3)
-            client.publish("Smartmeter/StromL1",StromL1)
-            client.publish("Smartmeter/StromL2",StromL2)
-            client.publish("Smartmeter/StromL3",StromL3)
-            if client.publish("Smartmeter/Leistungsfaktor",Leistungsfaktor)[0] != 0 :
+            client.publish(mqttTopic + "/WirkenergieP",WirkenergieP)
+            client.publish(mqttTopic + "/WirkenergieN",WirkenergieN)
+            client.publish(mqttTopic + "/MomentanleistungP",MomentanleistungP)
+            client.publish(mqttTopic + "/MomentanleistungN",MomentanleistungN)
+            client.publish(mqttTopic + "/Momentanleistung",MomentanleistungP - MomentanleistungN)
+            client.publish(mqttTopic + "/SpannungL1",SpannungL1)
+            client.publish(mqttTopic + "/SpannungL2",SpannungL2)
+            client.publish(mqttTopic + "/SpannungL3",SpannungL3)
+            client.publish(mqttTopic + "/StromL1",StromL1)
+            client.publish(mqttTopic + "/StromL2",StromL2)
+            client.publish(mqttTopic + "/StromL3",StromL3)
+            if client.publish(mqttTopic + "/Leistungsfaktor",Leistungsfaktor)[0] != 0 :
                 print("Publish fehlgeschlagen!")
                 client.connect(mqttBroker, mqttport)
 
     except BaseException as err:
         print("Fehler: ", format(err))
         continue
-
