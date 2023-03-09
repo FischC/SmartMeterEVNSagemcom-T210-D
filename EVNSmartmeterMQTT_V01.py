@@ -10,7 +10,8 @@ from bs4 import BeautifulSoup
 from Cryptodome.Cipher import AES
 from time import sleep
 from gurux_dlms.TranslatorOutputType import TranslatorOutputType
-
+import certifi
+import uuid
 
 # EVN Schlüssel eingeben zB. "36C66639E48A8CA4D6BC8B282A793BBB"
 evn_schluessel = "EVN Schlüssel"
@@ -19,6 +20,7 @@ evn_schluessel = "EVN Schlüssel"
 useMQTT = True
 
 #MQTT Broker IP adresse Eingeben ohne Port!
+mqttSSL = False
 mqttBroker = "127.0.0.1"
 mqttuser =""
 mqttpasswort = ""
@@ -64,13 +66,15 @@ units = {
 #MQTT Init
 if useMQTT:
     try:
-        client = mqtt.Client("SmartMeter")
+        client = mqtt.Client("SmartMeter_"+str(uuid.uuid1()))
         client.username_pw_set(mqttuser, mqttpasswort)
+        if mqttSSL:
+            client.tls_set(certifi.where())        
         client.connect(mqttBroker, mqttport)
+        client.loop_start()
     except:
         print("Die Ip Adresse des Brokers ist falsch!")
         sys.exit()
-
     
 tr = GXDLMSTranslator(TranslatorOutputType.SIMPLE_XML)
 serIn = serial.Serial( port=comport,
@@ -102,7 +106,6 @@ while 1:
     frameCounter = daten[44:52]
     frame = daten[52:560]
     
-
     frame = unhexlify(frame)
     encryption_key = unhexlify(evn_schluessel)
     init_vector = unhexlify(systemTitel + frameCounter)
@@ -122,7 +125,6 @@ while 1:
         print("Fehler: ", format(err))
         continue
        
-
     try:
         #Wirkenergie A+ in Wattstunden
         WirkenergieP = int(str(results_32[0].get('value')),16)*10**s8(str(results_int8[0].get('value')))
@@ -141,15 +143,15 @@ while 1:
         MomentanleistungNUnit = units[int(results_enum[3].get('value'), 16)]
         
         #Spannung L1
-        SpannungL1 = int(str(results_16[0].get('value')),16)*10**s8(str(results_int8[4].get('value')))
+        SpannungL1 = round(float(int(str(results_16[0].get('value')),16)*10**s8(str(results_int8[4].get('value')))),2)
         SpannungL1Unit = units[int(results_enum[4].get('value'), 16)]
         
         #Spannung L2
-        SpannungL2 = int(str(results_16[1].get('value')),16)*10**s8(str(results_int8[5].get('value')))
+        SpannungL2 = round(float(int(str(results_16[1].get('value')),16)*10**s8(str(results_int8[5].get('value')))),2)
         SpannungL2Unit = units[int(results_enum[5].get('value'), 16)]
         
         #Spannung L3
-        SpannungL3 = int(str(results_16[2].get('value')),16)*10**s8(str(results_int8[6].get('value')))
+        SpannungL3 = round(float(int(str(results_16[2].get('value')),16)*10**s8(str(results_int8[6].get('value')))),2)
         SpannungL3Unit = units[int(results_enum[6].get('value'), 16)]
         
         #Strom L1
@@ -169,20 +171,20 @@ while 1:
         LeistungsfaktorUnit = units[int(results_enum[10].get('value'), 16)]
                         
         if printValue:
-            print('Wirkenergie+: ' + str(WirkenergieP) + WirkenergiePUnit)
-            print('Wirkenergie-: ' + str(WirkenergieN) + WirkenergieNUnit)
-            print('Momentanleistung+: ' + str(MomentanleistungP) + MomentanleistungPUnit)
-            print('Momentanleistung-: ' + str(MomentanleistungN) + MomentanleistungNUnit)
-            print('Spannung L1: ' + str(SpannungL1) + SpannungL1Unit)
-            print('Spannung L2: ' + str(SpannungL2) + SpannungL2Unit)
-            print('Spannung L3: ' + str(SpannungL3) + SpannungL3Unit)
-            print('Strom L1: ' + str(StromL1) + StromL1Unit)
-            print('Strom L2: ' + str(StromL2) + StromL2Unit)
-            print('Strom L3: ' + str(StromL3) + StromL3Unit)
-            print('Leistungsfaktor: ' + str(Leistungsfaktor) + LeistungsfaktorUnit)
-            print('Momentanleistung: ' + str(MomentanleistungP-MomentanleistungN) + MomentanleistungPUnit)
-            print()
-            print()
+            print("\n\t\t*** Daten vom Smartmeter ***\n\nBezeichnung\t\t Wert")
+            print('Wirkenergie+\t\t ' + str(WirkenergieP) + ' ' + WirkenergiePUnit)
+            print('Wirkenergie-\t\t ' + str(WirkenergieN) + ' ' + WirkenergieNUnit)
+            print('Momentanleistung+\t ' + str(MomentanleistungP) + ' ' + MomentanleistungPUnit)
+            print('Momentanleistung-\t ' + str(MomentanleistungN) + ' ' + MomentanleistungNUnit)
+            print('Spannung L1\t\t ' + str(SpannungL1) + ' ' + SpannungL1Unit)
+            print('Spannung L2\t\t ' + str(SpannungL2) + ' ' + SpannungL2Unit)
+            print('Spannung L3\t\t ' + str(SpannungL3) + ' ' + SpannungL3Unit)
+            print('Strom L1\t\t ' + str(StromL1) + ' ' + StromL1Unit)
+            print('Strom L2\t\t ' + str(StromL2) + ' ' + StromL2Unit)
+            print('Strom L3\t\t ' + str(StromL3) + ' ' + StromL3Unit)
+            print('Leistungsfaktor\t\t ' + str(Leistungsfaktor) + ' ' + LeistungsfaktorUnit)
+            print('Momentanleistung\t ' + str(MomentanleistungP-MomentanleistungN) + ' ' + MomentanleistungPUnit)
+            print('')
         
         #MQTT
         if useMQTT:
