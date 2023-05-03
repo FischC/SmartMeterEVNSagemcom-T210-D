@@ -11,6 +11,8 @@ from gurux_dlms.TranslatorOutputType import TranslatorOutputType
 from bs4 import BeautifulSoup
 from xml.etree.ElementTree import XML, fromstring
 from time import sleep
+import certifi
+import uuid
 
 # EVN Schlüssel eingeben zB. "36C66639E48A8CA4D6BC8B282A793BBB"
 evn_schluessel = "EVN Schlüssel"
