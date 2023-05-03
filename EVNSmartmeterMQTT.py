@@ -87,6 +87,8 @@ while 1:
             stream = ""
         continue
 
+    frameCounter = int(daten[44:52],16)
+
     try:
         msg = GXDLMSTranslatorMessage()
         msg.message = GXByteBuffer(daten)
@@ -97,7 +99,6 @@ while 1:
             pdu.clear()
             xml += tr.messageToXml(msg)
 
-        frameCounter = int(daten[44:52],16)
         soup = BeautifulSoup(xml, 'lxml')
         results_32 = soup.find_all('uint32')
         results_16 = soup.find_all('uint16')
