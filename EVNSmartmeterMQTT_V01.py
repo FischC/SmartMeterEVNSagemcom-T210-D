@@ -1,23 +1,22 @@
 import serial
 import time
-from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from binascii import unhexlify
 import sys
 import string
 import paho.mqtt.client as mqtt
 from gurux_dlms.GXDLMSTranslator import GXDLMSTranslator
-from bs4 import BeautifulSoup
-from Cryptodome.Cipher import AES
-from time import sleep
+from gurux_dlms.GXDLMSTranslatorMessage import GXDLMSTranslatorMessage
+from gurux_dlms.GXByteBuffer import GXByteBuffer
 from gurux_dlms.TranslatorOutputType import TranslatorOutputType
-import certifi
-import uuid
+from bs4 import BeautifulSoup
+from xml.etree.ElementTree import XML, fromstring
+from time import sleep
 
 # EVN Schlüssel eingeben zB. "36C66639E48A8CA4D6BC8B282A793BBB"
 evn_schluessel = "EVN Schlüssel"
 
 #MQTT Verwenden (True | False)
-useMQTT = True
+useMQTT = False
 
 #MQTT Broker IP adresse Eingeben ohne Port!
 mqttSSL = False
@@ -44,25 +43,6 @@ def recv(serialIncoming):
         sleep(0.5)
     return data
 
-# Konvertiert Signed Ints
-def s16(value):
-    val = int(value, 16)
-    return -(val & 0x8000) | (val & 0x7fff)
-
-def s8(value):
-    val = int(value, 16)
-    return -(val & 0x80) | (val & 0x7f)
-
-# DLMS Blue Book Page 52
-# https://www.dlms.com/files/Blue_Book_Edition_13-Excerpt.pdf
-units = {
-            27: "W", # 0x1b
-            30: "Wh", # 0x1e
-            33: "A", #0x21
-            35: "V", #0x23
-            255: "" # 0xff: no unit, unitless
-}
-
 #MQTT Init
 if useMQTT:
     try:
@@ -77,6 +57,9 @@ if useMQTT:
         sys.exit()
     
 tr = GXDLMSTranslator(TranslatorOutputType.SIMPLE_XML)
+tr.blockCipherKey = GXByteBuffer(evn_schluessel)
+tr.comments = True
+
 serIn = serial.Serial( port=comport,
          baudrate=2400,
          bytesize=serial.EIGHTBITS,
@@ -90,104 +73,70 @@ daten = ""
 while 1:
     sleep(.25)
     stream += recv(serIn).hex()
-    spos = stream.find("68010168")
+    spos = stream.find("68fafa68")
     if spos != -1:
         stream = stream[spos:]
-        if len(stream) < 560 : continue
-        daten = stream[:560]
-        stream = stream[560:] 
+        if len(stream) < 564 : continue
+        daten = stream[:564]
+        stream = stream[564:]
     else:
-        if len(stream) > (560 * 10) : 
+        if len(stream) > (564 * 10) :
             print ("Missing Start Bytes... waiting")
             stream = ""
         continue
 
-    systemTitel = daten[22:38]
-    frameCounter = daten[44:52]
-    frame = daten[52:560]
-    
-    frame = unhexlify(frame)
-    encryption_key = unhexlify(evn_schluessel)
-    init_vector = unhexlify(systemTitel + frameCounter)
-    cipher = AES.new(encryption_key, AES.MODE_GCM, nonce=init_vector)
-    apdu = cipher.decrypt(frame).hex()    
-
     try:
-        xml = tr.pduToXml(apdu,)
+        msg = GXDLMSTranslatorMessage()
+        msg.message = GXByteBuffer(daten)
+        xml = ""
+        pdu = GXByteBuffer()
+        tr.completePdu = True
+        while tr.findNextFrame(msg, pdu):
+            pdu.clear()
+            xml += tr.messageToXml(msg)
+
+        frameCounter = int(daten[44:52],16)
         soup = BeautifulSoup(xml, 'lxml')
         results_32 = soup.find_all('uint32')
         results_16 = soup.find_all('uint16')
-        results_int16 = soup.find_all('int16')
-        results_int8 = soup.find_all('int8')
-        results_enum = soup.find_all('enum')
 
     except BaseException as err:
         print("Fehler: ", format(err))
         continue
        
     try:
-        #Wirkenergie A+ in Wattstunden
-        WirkenergieP = int(str(results_32[0].get('value')),16)*10**s8(str(results_int8[0].get('value')))
-        WirkenergiePUnit = units[int(results_enum[0].get('value'), 16)]
-
-        #Wirkenergie A- in Wattstunden
-        WirkenergieN = int(str(results_32[1].get('value')),16)*10**s8(str(results_int8[1].get('value')))
-        WirkenergieNUnit = units[int(results_enum[1].get('value'), 16)]
         
-        #Momentanleistung P+ in Watt
-        MomentanleistungP = int(str(results_32[2].get('value')),16)*10**s8(str(results_int8[2].get('value')))
-        MomentanleistungPUnit = units[int(results_enum[2].get('value'), 16)]
-
-        #Momentanleistung P- in Watt
-        MomentanleistungN = int(str(results_32[3].get('value')),16)*10**s8(str(results_int8[3].get('value')))
-        MomentanleistungNUnit = units[int(results_enum[3].get('value'), 16)]
-        
-        #Spannung L1
-        SpannungL1 = round(float(int(str(results_16[0].get('value')),16)*10**s8(str(results_int8[4].get('value')))),2)
-        SpannungL1Unit = units[int(results_enum[4].get('value'), 16)]
-        
-        #Spannung L2
-        SpannungL2 = round(float(int(str(results_16[1].get('value')),16)*10**s8(str(results_int8[5].get('value')))),2)
-        SpannungL2Unit = units[int(results_enum[5].get('value'), 16)]
-        
-        #Spannung L3
-        SpannungL3 = round(float(int(str(results_16[2].get('value')),16)*10**s8(str(results_int8[6].get('value')))),2)
-        SpannungL3Unit = units[int(results_enum[6].get('value'), 16)]
-        
-        #Strom L1
-        StromL1 = int(str(results_16[3].get('value')),16)*10**s8(str(results_int8[7].get('value')))
-        StromL1Unit = units[int(results_enum[7].get('value'), 16)]
-        
-        #Strom L2
-        StromL2 = int(str(results_16[4].get('value')),16)*10**s8(str(results_int8[8].get('value')))
-        StromL2Unit = units[int(results_enum[8].get('value'), 16)]
-        
-        #Strom L3
-        StromL3 = int(str(results_16[5].get('value')),16)*10**s8(str(results_int8[9].get('value')))
-        StromL3Unit = units[int(results_enum[9].get('value'), 16)]
-        
-        #Leistungsfaktor
-        Leistungsfaktor = s16(str(results_int16[0].get('value')))*10**s8(str(results_int8[10].get('value')))
-        LeistungsfaktorUnit = units[int(results_enum[10].get('value'), 16)]
+        WirkenergieP = int(str(results_32)[16:16+8],16)             #Wirkenergie A+ in Wattstunden        
+        WirkenergieN = int(str(results_32)[52:52+8],16)             #Wirkenergie A- in Wattstunden        
+        MomentanleistungP = int(str(results_32)[88:88+8],16)        #Momentanleistung P+ in Watt
+        MomentanleistungN = int(str(results_32)[124:124+8],16)      #Momentanleistung P- in Watt        
+        SpannungL1 = int(str(results_16)[16:20],16)/10              #Spannung L1 in Volt        
+        SpannungL2 = int(str(results_16)[48:52],16)/10              #Spannung L2 in Volt        
+        SpannungL3 = int(str(results_16)[80:84],16)/10              #Spannung L3 in Volt        
+        StromL1 = int(str(results_16)[112:116],16)/100              #Strom L1 in Ampere    
+        StromL2 = int(str(results_16)[144:148],16)/100              #Strom L2 in Ampere        
+        StromL3 = int(str(results_16)[176:180],16)/100              #Strom L3 in Ampere        
+        Leistungsfaktor = int(str(results_16)[208:212],16)/1000     #Leistungsfaktor
                         
         if printValue:
-            print("\n\t\t*** Daten vom Smartmeter ***\n\nBezeichnung\t\t Wert")
-            print('Wirkenergie+\t\t ' + str(WirkenergieP) + ' ' + WirkenergiePUnit)
-            print('Wirkenergie-\t\t ' + str(WirkenergieN) + ' ' + WirkenergieNUnit)
-            print('Momentanleistung+\t ' + str(MomentanleistungP) + ' ' + MomentanleistungPUnit)
-            print('Momentanleistung-\t ' + str(MomentanleistungN) + ' ' + MomentanleistungNUnit)
-            print('Spannung L1\t\t ' + str(SpannungL1) + ' ' + SpannungL1Unit)
-            print('Spannung L2\t\t ' + str(SpannungL2) + ' ' + SpannungL2Unit)
-            print('Spannung L3\t\t ' + str(SpannungL3) + ' ' + SpannungL3Unit)
-            print('Strom L1\t\t ' + str(StromL1) + ' ' + StromL1Unit)
-            print('Strom L2\t\t ' + str(StromL2) + ' ' + StromL2Unit)
-            print('Strom L3\t\t ' + str(StromL3) + ' ' + StromL3Unit)
-            print('Leistungsfaktor\t\t ' + str(Leistungsfaktor) + ' ' + LeistungsfaktorUnit)
-            print('Momentanleistung\t ' + str(MomentanleistungP-MomentanleistungN) + ' ' + MomentanleistungPUnit)
+            print("\n\t\t*** Daten vom Smartmeter (" + str(frameCounter) + ") ***\n\nBezeichnung\t\t Wert")
+            print('Wirkenergie+\t\t ' + str(WirkenergieP) + ' Wh')
+            print('Wirkenergie-\t\t ' + str(WirkenergieN) + ' Wh')
+            print('Momentanleistung+\t ' + str(MomentanleistungP) + ' W')
+            print('Momentanleistung-\t ' + str(MomentanleistungN) + ' W')
+            print('Spannung L1\t\t ' + str(SpannungL1) + ' V')
+            print('Spannung L2\t\t ' + str(SpannungL2) + ' V')
+            print('Spannung L3\t\t ' + str(SpannungL3) + ' V')
+            print('Strom L1\t\t ' + str(StromL1) + ' A')
+            print('Strom L2\t\t ' + str(StromL2) + ' A')
+            print('Strom L3\t\t ' + str(StromL3) + ' A')
+            print('Leistungsfaktor\t\t ' + str(Leistungsfaktor))
+            print('Momentanleistung\t ' + str(MomentanleistungP-MomentanleistungN) + ' W')
             print('')
         
         #MQTT
         if useMQTT:
+            client.publish(mqttTopic + "/Frame",frameCounter)
             client.publish(mqttTopic + "/WirkenergieP",WirkenergieP)
             client.publish(mqttTopic + "/WirkenergieN",WirkenergieN)
             client.publish(mqttTopic + "/MomentanleistungP",MomentanleistungP)
